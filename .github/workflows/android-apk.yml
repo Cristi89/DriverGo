@@ -1,0 +1,65 @@
+
+name: Build DriveGo APKs
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main, master]
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Extract project ZIP
+        run: |
+          ZIP=$(find . -maxdepth 1 -name '*.zip' -print -quit)
+          test -n "$ZIP"
+          mkdir extracted
+          unzip -q "$ZIP" -d extracted
+          ROOT=$(find extracted -name package.json -printf '%h\n' | grep '/UserApp$' | head -1)
+          test -n "$ROOT"
+          echo "PROJECT_ROOT=$(dirname "$ROOT")" >> "$GITHUB_ENV"
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '16'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build both APKs
+        run: |
+          sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.2"
+          npm install -g yarn@1.22.22
+
+          cd "$PROJECT_ROOT/UserApp"
+          yarn install --frozen-lockfile
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+          cd "$GITHUB_WORKSPACE/$PROJECT_ROOT/DriverApp"
+          yarn install --frozen-lockfile
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/dist/DriveGo-Autista.apk"
+          cp "$GITHUB_WORKSPACE/$PROJECT_ROOT/UserApp/android/app/build/outputs/apk/debug/app-debug.apk" "$GITHUB_WORKSPACE/dist/DriveGo-Passeggero.apk"
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: DriveGo-Android-APKs
+          path: dist/*.apk
