@@ -15,24 +15,30 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Extract project ZIP
+        shell: bash
         run: |
+          set -e
           mkdir -p extracted
           ZIP=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+
           if [ -z "$ZIP" ]; then
-            echo "ERRORE: nessun file ZIP trovato."
+            echo "ERRORE: nessun file ZIP trovato nella root."
             exit 1
           fi
+
           unzip -q "$ZIP" -d extracted
 
-          ROOT=$(find extracted -type d -name UserApp -printf '%h\n' | head -n 1)
+          ROOT=$(find extracted -type d -name UserApp -print -quit)
+
           if [ -z "$ROOT" ] || [ ! -d "$ROOT/DriverApp" ]; then
             echo "ERRORE: non trovo UserApp e DriverApp nella stessa cartella."
-            find extracted -maxdepth 4 -type d
+            find extracted -maxdepth 5 -type d
             exit 1
           fi
-          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
 
-      - name: Setup Java 17 for Android SDK
+          echo "PROJECT_ROOT=$(dirname "$ROOT")" >> "$GITHUB_ENV"
+
+      - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -56,27 +62,32 @@ jobs:
         run: npm install -g yarn@1.22.22
 
       - name: Build UserApp APK
+        shell: bash
         run: |
+          set -e
           cd "$PROJECT_ROOT/UserApp"
           yarn install --frozen-lockfile
           cd android
           chmod +x gradlew
-          JAVA_HOME="$JAVA_HOME_11_X64" PATH="$JAVA_HOME_11_X64/bin:$PATH" ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-daemon
 
       - name: Build DriverApp APK
+        shell: bash
         run: |
+          set -e
           cd "$PROJECT_ROOT/DriverApp"
           yarn install --frozen-lockfile
           cd android
           chmod +x gradlew
-          JAVA_HOME="$JAVA_HOME_11_X64" PATH="$JAVA_HOME_11_X64/bin:$PATH" ./gradlew assembleDebug
+          ./gradlew assembleDebug --no-daemon
 
       - name: Upload APKs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: DriveGo-APKs
           path: |
             extracted/**/UserApp/android/app/build/outputs/apk/debug/*.apk
             extracted/**/DriverApp/android/app/build/outputs/apk/debug/*.apk
-          if-no-files-found: error
+          if-no-files-found: warn
           retention-days: 14
