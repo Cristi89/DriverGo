@@ -19,6 +19,7 @@ jobs:
         run: |
           set -e
           mkdir -p extracted
+
           ZIP=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
 
           if [ -z "$ZIP" ]; then
@@ -26,17 +27,27 @@ jobs:
             exit 1
           fi
 
+          echo "Archivio trovato: $ZIP"
           unzip -q "$ZIP" -d extracted
 
           ROOT=$(find extracted -type d -name UserApp -print -quit)
 
-          if [ -z "$ROOT" ] || [ ! -d "$ROOT/DriverApp" ]; then
-            echo "ERRORE: non trovo UserApp e DriverApp nella stessa cartella."
+          if [ -z "$ROOT" ]; then
+            echo "ERRORE: cartella UserApp non trovata nello ZIP."
             find extracted -maxdepth 5 -type d
             exit 1
           fi
 
-          echo "PROJECT_ROOT=$(dirname "$ROOT")" >> "$GITHUB_ENV"
+          PROJECT=$(dirname "$ROOT")
+
+          if [ ! -d "$PROJECT/DriverApp" ]; then
+            echo "ERRORE: DriverApp non si trova accanto a UserApp."
+            find extracted -maxdepth 5 -type d
+            exit 1
+          fi
+
+          echo "PROJECT_ROOT=$PROJECT" >> "$GITHUB_ENV"
+          echo "Progetto trovato: $PROJECT"
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -66,7 +77,14 @@ jobs:
         run: |
           set -e
           cd "$PROJECT_ROOT/UserApp"
+
+          if [ ! -f package.json ]; then
+            echo "ERRORE: package.json non trovato in UserApp."
+            exit 1
+          fi
+
           yarn install --frozen-lockfile
+
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
@@ -76,7 +94,14 @@ jobs:
         run: |
           set -e
           cd "$PROJECT_ROOT/DriverApp"
+
+          if [ ! -f package.json ]; then
+            echo "ERRORE: package.json non trovato in DriverApp."
+            exit 1
+          fi
+
           yarn install --frozen-lockfile
+
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug --no-daemon
