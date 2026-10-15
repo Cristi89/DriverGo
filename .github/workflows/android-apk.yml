@@ -33,9 +33,14 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '16'
-
+          
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platform-tools
+            platforms;android-29
+            build-tools;29.0.2
 
       - name: Build both APKs
         run: |
