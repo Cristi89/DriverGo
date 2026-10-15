@@ -1,11 +1,8 @@
-
-
 name: Build DriveGo APKs
 
 on:
   push:
-    branches:
-      - main
+    branches: [main]
   workflow_dispatch:
 
 jobs:
@@ -21,13 +18,13 @@ jobs:
           mkdir -p extracted
           ZIP=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
           if [ -z "$ZIP" ]; then
-            echo "ERRORE: non trovo il file ZIP del progetto nella root."
+            echo "ERRORE: nessun file ZIP trovato nella root del repository."
             exit 1
           fi
           unzip -q "$ZIP" -d extracted
           ROOT=$(find extracted -name package.json -printf '%h\n' | head -n 1)
           if [ -z "$ROOT" ]; then
-            echo "ERRORE: non trovo package.json nel progetto ZIP."
+            echo "ERRORE: package.json non trovato nello ZIP."
             exit 1
           fi
           echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
@@ -43,21 +40,21 @@ jobs:
         with:
           node-version: '20'
 
-      - name: Setup Android SDK
+      - name: Install Android SDK
         uses: android-actions/setup-android@v3
+        with:
+          packages: |
+            platform-tools
+            platforms;android-29
+            build-tools;29.0.2
 
-      - name: Install Android packages
-        run: |
-          yes | sdkmanager --licenses
-          sdkmanager "platform-tools"
-          sdkmanager "platforms;android-29"
-          sdkmanager "build-tools;29.0.2"
+      - name: Accept Android licenses
+        run: yes | sdkmanager --licenses
 
       - name: Install Yarn
         run: npm install -g yarn@1.22.22
 
       - name: Build UserApp APK
-        working-directory: ${{ github.workspace }}
         run: |
           cd "$PROJECT_ROOT/UserApp"
           yarn install --frozen-lockfile
@@ -66,7 +63,6 @@ jobs:
           ./gradlew assembleDebug
 
       - name: Build DriverApp APK
-        working-directory: ${{ github.workspace }}
         run: |
           cd "$PROJECT_ROOT/DriverApp"
           yarn install --frozen-lockfile
