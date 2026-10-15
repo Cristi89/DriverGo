@@ -1,27 +1,36 @@
 
+
 name: Build DriveGo APKs
 
 on:
-  workflow_dispatch:
   push:
-    branches: [main, master]
+    branches:
+      - main
+  workflow_dispatch:
 
 jobs:
   build:
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-latest
+
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
       - name: Extract project ZIP
         run: |
-          ZIP=$(find . -maxdepth 1 -name '*.zip' -print -quit)
-          test -n "$ZIP"
-          mkdir extracted
+          mkdir -p extracted
+          ZIP=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
+          if [ -z "$ZIP" ]; then
+            echo "ERRORE: non trovo il file ZIP del progetto nella root."
+            exit 1
+          fi
           unzip -q "$ZIP" -d extracted
-          ROOT=$(find extracted -name package.json -printf '%h\n' | grep '/UserApp$' | head -1)
-          test -n "$ROOT"
-          echo "PROJECT_ROOT=$(dirname "$ROOT")" >> "$GITHUB_ENV"
+          ROOT=$(find extracted -name package.json -printf '%h\n' | head -n 1)
+          if [ -z "$ROOT" ]; then
+            echo "ERRORE: non trovo package.json nel progetto ZIP."
+            exit 1
+          fi
+          echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
 
       - name: Setup Java
         uses: actions/setup-java@v4
@@ -32,39 +41,45 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: '16'
-          
+          node-version: '20'
+
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
-        with:
-          packages: |
-            platform-tools
-            platforms;android-29
-            build-tools;29.0.2
 
-      - name: Build both APKs
+      - name: Install Android packages
         run: |
-          
-          npm install -g yarn@1.22.22
+          yes | sdkmanager --licenses
+          sdkmanager "platform-tools"
+          sdkmanager "platforms;android-29"
+          sdkmanager "build-tools;29.0.2"
 
+      - name: Install Yarn
+        run: npm install -g yarn@1.22.22
+
+      - name: Build UserApp APK
+        working-directory: ${{ github.workspace }}
+        run: |
           cd "$PROJECT_ROOT/UserApp"
           yarn install --frozen-lockfile
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
-          cd "$GITHUB_WORKSPACE/$PROJECT_ROOT/DriverApp"
+      - name: Build DriverApp APK
+        working-directory: ${{ github.workspace }}
+        run: |
+          cd "$PROJECT_ROOT/DriverApp"
           yarn install --frozen-lockfile
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
 
-          mkdir -p "$GITHUB_WORKSPACE/dist"
-          cp app/build/outputs/apk/debug/app-debug.apk "$GITHUB_WORKSPACE/dist/DriveGo-Autista.apk"
-          cp "$GITHUB_WORKSPACE/$PROJECT_ROOT/UserApp/android/app/build/outputs/apk/debug/app-debug.apk" "$GITHUB_WORKSPACE/dist/DriveGo-Passeggero.apk"
-
       - name: Upload APKs
         uses: actions/upload-artifact@v4
         with:
-          name: DriveGo-Android-APKs
-          path: dist/*.apk
+          name: DriveGo-APKs
+          path: |
+            extracted/**/UserApp/android/app/build/outputs/apk/debug/*.apk
+            extracted/**/DriverApp/android/app/build/outputs/apk/debug/*.apk
+          if-no-files-found: error
+          retention-days: 14
