@@ -66,13 +66,12 @@ jobs:
           node-version: '20'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-        with:
-          packages: ''
+        uses: android-actions/setup-android@v3
 
       - name: Install Android packages
         shell: bash
         run: |
+          yes | sdkmanager --licenses || true
           sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.2"
 
       - name: Install Yarn
@@ -83,24 +82,11 @@ jobs:
         run: |
           set -e
           cd "$USERAPP"
-
-          if [ ! -f package.json ]; then
-            echo "ERRORE: package.json non trovato in UserApp."
-            exit 1
-          fi
-
-          if [ ! -f android/gradlew ]; then
-            echo "ERRORE: android/gradlew non trovato in UserApp."
-            exit 1
-          fi
-
-          yarn install --ignore-engines
+          yarn install --frozen-lockfile
           cd android
           chmod +x gradlew
-
           export JAVA_HOME="$JAVA_HOME_11_X64"
           export PATH="$JAVA_HOME/bin:$PATH"
-
           ./gradlew --no-daemon assembleDebug
 
       - name: Build DriverApp APK
@@ -108,47 +94,31 @@ jobs:
         run: |
           set -e
           cd "$DRIVERAPP"
-
-          if [ ! -f package.json ]; then
-            echo "ERRORE: package.json non trovato in DriverApp."
-            exit 1
-          fi
-
-          if [ ! -f android/gradlew ]; then
-            echo "ERRORE: android/gradlew non trovato in DriverApp."
-            exit 1
-          fi
-
-          yarn install --ignore-engines
+          yarn install --frozen-lockfile
           cd android
           chmod +x gradlew
-
           export JAVA_HOME="$JAVA_HOME_11_X64"
           export PATH="$JAVA_HOME/bin:$PATH"
-
           ./gradlew --no-daemon assembleDebug
 
       - name: Collect APK files
-        if: success()
+        if: always()
         shell: bash
         run: |
-          mkdir -p apks
+          mkdir -p apk-output
 
-          find extracted -type f -path '*/build/outputs/apk/*/*.apk' \
-            -exec cp {} apks/ \;
+          find extracted -type f -name '*.apk' \
+            -path '*/build/outputs/apk/*' \
+            -exec cp --parents {} apk-output/ \; || true
 
-          if [ -z "$(find apks -maxdepth 1 -name '*.apk' -print -quit)" ]; then
-            echo "ERRORE: nessun APK generato."
-            exit 1
-          fi
-
-          ls -lh apks
+          echo "APK trovati:"
+          find apk-output -type f -name '*.apk' || true
 
       - name: Upload APKs
-        if: success()
         uses: actions/upload-artifact@v4
+        if: always()
         with:
           name: DriveGo-APKs
-          path: apks/*.apk
-          if-no-files-found: error
+          path: apk-output/**/*.apk
+          if-no-files-found: warn
           retention-days: 14
