@@ -18,40 +18,25 @@ jobs:
         run: |
           mkdir -p extracted
           ZIP=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
-
           if [ -z "$ZIP" ]; then
-            echo "ERRORE: nessun file ZIP trovato nella root."
+            echo "ERRORE: nessun file ZIP trovato."
             exit 1
           fi
-
           unzip -q "$ZIP" -d extracted
 
-          ROOT=$(find extracted -name package.json -printf '%h\n' | while read dir; do
-            if [ -d "$dir/UserApp" ] && [ -d "$dir/DriverApp" ]; then
-              echo "$dir"
-              break
-            fi
-          done)
-
-          if [ -z "$ROOT" ]; then
-            ROOT=$(find extracted -type d -name UserApp -printf '%h\n' | head -n 1)
-          fi
-
-          if [ -z "$ROOT" ] || [ ! -d "$ROOT/UserApp" ] || [ ! -d "$ROOT/DriverApp" ]; then
-            echo "ERRORE: non trovo entrambe le cartelle UserApp e DriverApp."
-            echo "Controlla la struttura del file ZIP."
+          ROOT=$(find extracted -type d -name UserApp -printf '%h\n' | head -n 1)
+          if [ -z "$ROOT" ] || [ ! -d "$ROOT/DriverApp" ]; then
+            echo "ERRORE: non trovo UserApp e DriverApp nella stessa cartella."
             find extracted -maxdepth 4 -type d
             exit 1
           fi
-
           echo "PROJECT_ROOT=$ROOT" >> "$GITHUB_ENV"
-          echo "Progetto trovato: $ROOT"
 
-      - name: Setup Java
+      - name: Setup Java 17 for Android SDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '11'
+          java-version: '17'
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -76,7 +61,7 @@ jobs:
           yarn install --frozen-lockfile
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          JAVA_HOME="$JAVA_HOME_11_X64" PATH="$JAVA_HOME_11_X64/bin:$PATH" ./gradlew assembleDebug
 
       - name: Build DriverApp APK
         run: |
@@ -84,7 +69,7 @@ jobs:
           yarn install --frozen-lockfile
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          JAVA_HOME="$JAVA_HOME_11_X64" PATH="$JAVA_HOME_11_X64/bin:$PATH" ./gradlew assembleDebug
 
       - name: Upload APKs
         uses: actions/upload-artifact@v4
