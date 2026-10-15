@@ -23,17 +23,16 @@ jobs:
           ZIP=$(find . -maxdepth 1 -type f -iname "*.zip" | head -n 1)
 
           if [ -z "$ZIP" ]; then
-            echo "ERRORE: nessun file ZIP trovato nella root."
+            echo "ERRORE: nessun file ZIP trovato."
             exit 1
           fi
 
-          echo "Archivio trovato: $ZIP"
           unzip -q "$ZIP" -d extracted
 
           ROOT=$(find extracted -type d -name UserApp -print -quit)
 
           if [ -z "$ROOT" ]; then
-            echo "ERRORE: cartella UserApp non trovata nello ZIP."
+            echo "ERRORE: cartella UserApp non trovata."
             find extracted -maxdepth 5 -type d
             exit 1
           fi
@@ -41,7 +40,7 @@ jobs:
           PROJECT=$(dirname "$ROOT")
 
           if [ ! -d "$PROJECT/DriverApp" ]; then
-            echo "ERRORE: DriverApp non si trova accanto a UserApp."
+            echo "ERRORE: DriverApp non trovato accanto a UserApp."
             find extracted -maxdepth 5 -type d
             exit 1
           fi
@@ -49,16 +48,11 @@ jobs:
           echo "PROJECT_ROOT=$PROJECT" >> "$GITHUB_ENV"
           echo "Progetto trovato: $PROJECT"
 
-      - name: Setup Java
+      - name: Setup Java 17 for Android SDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
@@ -69,19 +63,25 @@ jobs:
         run: |
           sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.2"
 
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Install Yarn
         run: npm install -g yarn@1.22.22
+
+      - name: Setup Java 11 for legacy Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
 
       - name: Build UserApp APK
         shell: bash
         run: |
           set -e
           cd "$PROJECT_ROOT/UserApp"
-
-          if [ ! -f package.json ]; then
-            echo "ERRORE: package.json non trovato in UserApp."
-            exit 1
-          fi
 
           yarn install --frozen-lockfile
 
@@ -94,11 +94,6 @@ jobs:
         run: |
           set -e
           cd "$PROJECT_ROOT/DriverApp"
-
-          if [ ! -f package.json ]; then
-            echo "ERRORE: package.json non trovato in DriverApp."
-            exit 1
-          fi
 
           yarn install --frozen-lockfile
 
