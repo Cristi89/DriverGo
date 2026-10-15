@@ -44,7 +44,7 @@ jobs:
 
       - name: Build both APKs
         run: |
-          sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.2"
+          
           npm install -g yarn@1.22.22
 
           cd "$PROJECT_ROOT/UserApp"
