@@ -1,6 +1,6 @@
 name: Build DriveGo APKs
 
-"on":
+on:
 push:
 branches:
 - main
@@ -9,10 +9,9 @@ workflow_dispatch:
 jobs:
 build:
 runs-on: ubuntu-22.04
-
 steps:
-  - name: Checkout repository
-    uses: actions/checkout@v4
+- name: Checkout repository
+uses: actions/checkout@v4
 
   - name: Setup Java 17 for Android SDK
     uses: actions/setup-java@v4
@@ -86,7 +85,6 @@ steps:
       test -n "$DRIVER_APK"
       cp "$USER_APK" output/UserApp.apk
       cp "$DRIVER_APK" output/DriverApp.apk
-      ls -lh output/
 
   - name: Upload APKs
     uses: actions/upload-artifact@v4
