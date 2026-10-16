@@ -1,4 +1,4 @@
-name: Build DriveGo APK
+name: Build DriveGo APKs
 
 on:
   push:
@@ -11,7 +11,7 @@ permissions:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-22.04
     timeout-minutes: 60
 
     steps:
@@ -24,14 +24,15 @@ jobs:
           set -euo pipefail
 
           mkdir -p extracted
+
           ZIP="DriveGo-MVP-v2-apk-build-ready.zip"
 
           if [ ! -f "$ZIP" ]; then
-            ZIP="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
+            ZIP="$(find . -maxdepth 1 -type f -name '*.zip' | head -n 1)"
           fi
 
-          if [ -z "${ZIP:-}" ] || [ ! -f "$ZIP" ]; then
-            echo "ERROR: file ZIP del progetto non trovato."
+          if [ -z "$ZIP" ] || [ ! -f "$ZIP" ]; then
+            echo "ERROR: Project ZIP not found."
             exit 1
           fi
 
@@ -41,7 +42,7 @@ jobs:
           DRIVERAPP="$(find extracted -type d -name DriverApp -print -quit)"
 
           if [ -z "$USERAPP" ] || [ -z "$DRIVERAPP" ]; then
-            echo "ERROR: UserApp o DriverApp non trovata."
+            echo "ERROR: UserApp or DriverApp not found."
             find extracted -maxdepth 5 -type d
             exit 1
           fi
@@ -49,31 +50,23 @@ jobs:
           echo "USERAPP=$USERAPP" >> "$GITHUB_ENV"
           echo "DRIVERAPP=$DRIVERAPP" >> "$GITHUB_ENV"
 
-      - name: Setup Java 17 for Android SDK
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v4
-
-      - name: Install Android SDK packages
-        shell: bash
-        run: |
-          set -euo pipefail
-          sdkmanager "platform-tools" \
-            "platforms;android-29" \
-            "build-tools;29.0.2" \
-            "ndk;21.4.7075529"
-
-      - name: Setup Java 11 for legacy Gradle
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '11'
 
-      - name: Setup Node.js
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK packages
+        run: |
+          sdkmanager "platform-tools" \
+            "platforms;android-29" \
+            "build-tools;29.0.2" \
+            "ndk;21.4.7075529"
+
+      - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
           node-version: '16'
@@ -85,18 +78,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$USERAPP"
           yarn install --frozen-lockfile
 
-          if [ -f android/gradle.properties ]; then
-            sed -i 's/^FLIPPER_VERSION=.*/FLIPPER_VERSION=0.99.0/' android/gradle.properties
-          fi
+          mkdir -p android/app/src/main/assets
+          mkdir -p android/app/src/main/res
+
+          node node_modules/react-native/cli.js bundle \
+            --platform android \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res
 
           cd android
           chmod +x gradlew
+
           printf 'sdk.dir=%s\nndk.dir=%s\n' \
             "$ANDROID_HOME" \
-            "$ANDROID_HOME/ndk/21.4.7075529" > local.properties
+            "$ANDROID_HOME/ndk/21.4.7075529" \
+            > local.properties
 
           ./gradlew --no-daemon --stacktrace assembleDebug
 
@@ -104,18 +106,27 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           cd "$DRIVERAPP"
           yarn install --frozen-lockfile
 
-          if [ -f android/gradle.properties ]; then
-            sed -i 's/^FLIPPER_VERSION=.*/FLIPPER_VERSION=0.99.0/' android/gradle.properties
-          fi
+          mkdir -p android/app/src/main/assets
+          mkdir -p android/app/src/main/res
+
+          node node_modules/react-native/cli.js bundle \
+            --platform android \
+            --dev false \
+            --entry-file index.js \
+            --bundle-output android/app/src/main/assets/index.android.bundle \
+            --assets-dest android/app/src/main/res
 
           cd android
           chmod +x gradlew
+
           printf 'sdk.dir=%s\nndk.dir=%s\n' \
             "$ANDROID_HOME" \
-            "$ANDROID_HOME/ndk/21.4.7075529" > local.properties
+            "$ANDROID_HOME/ndk/21.4.7075529" \
+            > local.properties
 
           ./gradlew --no-daemon --stacktrace assembleDebug
 
@@ -124,15 +135,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+
           mkdir -p apk-output
 
-          find "$USERAPP" "$DRIVERAPP" \
-            -path '*/build/outputs/apk/*/*.apk' \
-            -type f \
+          find extracted -type f -path '*/build/outputs/apk/*/*.apk' \
             -exec cp {} apk-output/ \;
 
           if ! find apk-output -maxdepth 1 -name '*.apk' | grep -q .; then
-            echo "ERROR: nessun APK generato."
+            echo "ERROR: No APK files generated."
             exit 1
           fi
 
