@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java 17
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "17"
@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          sdkmanager --licenses
+          yes | sdkmanager --licenses
           sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.2" "ndk;21.4.7075529"
 
       - name: Extract project archives
@@ -45,15 +45,45 @@ jobs:
           set -e
           USER_DIR="$(find extracted/user -type d -name UserApp -print -quit)"
           DRIVER_DIR="$(find extracted/driver -type d -name DriverApp -print -quit)"
-
-          test -n "$USER_DIR" || { echo "UserApp non trovato"; exit 1; }
-          test -n "$DRIVER_DIR" || { echo "DriverApp non trovato"; exit 1; }
-
+          test -n "$USER_DIR" || { echo "ERROR: UserApp non trovato"; exit 1; }
+          test -n "$DRIVER_DIR" || { echo "ERROR: DriverApp non trovato"; exit 1; }
           echo "user_dir=$USER_DIR" >> "$GITHUB_OUTPUT"
           echo "driver_dir=$DRIVER_DIR" >> "$GITHUB_OUTPUT"
 
+      - name: Disable Flipper in legacy React Native projects
+        shell: bash
+        run: |
+          set -e
+          for f in \
+            "${{ steps.apps.outputs.user_dir }}/android/app/build.gradle" \
+            "${{ steps.apps.outputs.driver_dir }}/android/app/build.gradle"; do
+            python3 - "$f" <<'PY'
+          import re, sys
+          from pathlib import Path
+          p = Path(sys.argv[1])
+          s = p.read_text()
+          # Remove the three Flipper debug dependencies, including their multiline blocks.
+          s, n1 = re.subn(
+              r'(?m)^[ \t]*debugImplementation\(["\']com\.facebook\.flipper:flipper:\$\{FLIPPER_VERSION\}["\']\)\s*\{.*?^[ \t]*\}\s*\n',
+              '', s, flags=re.S
+          )
+          s, n2 = re.subn(
+              r'(?m)^[ \t]*debugImplementation\(["\']com\.facebook\.flipper:flipper-network-plugin:\$\{FLIPPER_VERSION\}["\']\)\s*\{.*?^[ \t]*\}\s*\n',
+              '', s, flags=re.S
+          )
+          s, n3 = re.subn(
+              r'(?m)^[ \t]*debugImplementation\(["\']com\.facebook\.flipper:flipper-fresco-plugin:\$\{FLIPPER_VERSION\}["\']\)\s*\{.*?^[ \t]*\}\s*\n',
+              '', s, flags=re.S
+          )
+          if 'com.facebook.flipper:flipper-fresco-plugin' in s or 'com.facebook.flipper:flipper-network-plugin' in s or 'com.facebook.flipper:flipper:${FLIPPER_VERSION}' in s:
+              raise SystemExit(f"Flipper non rimosso correttamente da {p}")
+          p.write_text(s)
+          print(f"Flipper disabilitato in {p} (blocchi rimossi: {n1+n2+n3})")
+          PY
+          done
+
       - name: Setup Java 11 for legacy Gradle
-        uses: actions/setup-java@v5
+        uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: "11"
@@ -103,13 +133,10 @@ jobs:
         run: |
           set -e
           mkdir -p output
-
           USER_APK="$(find "${{ steps.apps.outputs.user_dir }}/android/app/build/outputs/apk" -type f -path '*/release/*.apk' -print -quit)"
           DRIVER_APK="$(find "${{ steps.apps.outputs.driver_dir }}/android/app/build/outputs/apk" -type f -path '*/release/*.apk' -print -quit)"
-
-          test -n "$USER_APK" || { echo "APK UserApp non generato"; exit 1; }
-          test -n "$DRIVER_APK" || { echo "APK DriverApp non generato"; exit 1; }
-
+          test -n "$USER_APK" || { echo "ERROR: APK UserApp non generato"; exit 1; }
+          test -n "$DRIVER_APK" || { echo "ERROR: APK DriverApp non generato"; exit 1; }
           cp "$USER_APK" output/UserApp.apk
           cp "$DRIVER_APK" output/DriverApp.apk
           ls -lh output/
