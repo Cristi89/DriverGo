@@ -1,4 +1,4 @@
-name: Build DriveGo APKs
+name: Build DriveGo APK
 
 on:
   push:
@@ -24,14 +24,14 @@ jobs:
           set -euo pipefail
 
           mkdir -p extracted
-
           ZIP="DriveGo-MVP-v2-apk-build-ready.zip"
+
           if [ ! -f "$ZIP" ]; then
-            ZIP="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1 || true)"
+            ZIP="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
           fi
 
-          if [ -z "$ZIP" ] || [ ! -f "$ZIP" ]; then
-            echo "ERRORE: file ZIP del progetto non trovato."
+          if [ -z "${ZIP:-}" ] || [ ! -f "$ZIP" ]; then
+            echo "ERROR: file ZIP del progetto non trovato."
             exit 1
           fi
 
@@ -41,7 +41,7 @@ jobs:
           DRIVERAPP="$(find extracted -type d -name DriverApp -print -quit)"
 
           if [ -z "$USERAPP" ] || [ -z "$DRIVERAPP" ]; then
-            echo "ERRORE: UserApp o DriverApp non trovata."
+            echo "ERROR: UserApp o DriverApp non trovata."
             find extracted -maxdepth 5 -type d
             exit 1
           fi
@@ -59,7 +59,9 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
+        shell: bash
         run: |
+          set -euo pipefail
           sdkmanager "platform-tools" \
             "platforms;android-29" \
             "build-tools;29.0.2" \
@@ -86,15 +88,16 @@ jobs:
           cd "$USERAPP"
           yarn install --frozen-lockfile
 
-          # Aggiorna Flipper solo se la versione legacy è presente.
           if [ -f android/gradle.properties ]; then
             sed -i 's/^FLIPPER_VERSION=.*/FLIPPER_VERSION=0.99.0/' android/gradle.properties
           fi
 
           cd android
           chmod +x gradlew
-          printf 'sdk.dir=%s\\nndk.dir=%s\\n' \
-            "$ANDROID_HOME" "$ANDROID_HOME/ndk;21.4.7075529" > local.properties
+          printf 'sdk.dir=%s\nndk.dir=%s\n' \
+            "$ANDROID_HOME" \
+            "$ANDROID_HOME/ndk/21.4.7075529" > local.properties
+
           ./gradlew --no-daemon --stacktrace assembleDebug
 
       - name: Build DriverApp APK
@@ -110,8 +113,10 @@ jobs:
 
           cd android
           chmod +x gradlew
-          printf 'sdk.dir=%s\\nndk.dir=%s\\n' \
-            "$ANDROID_HOME" "$ANDROID_HOME/ndk/;21.4.7075529" > local.properties
+          printf 'sdk.dir=%s\nndk.dir=%s\n' \
+            "$ANDROID_HOME" \
+            "$ANDROID_HOME/ndk/21.4.7075529" > local.properties
+
           ./gradlew --no-daemon --stacktrace assembleDebug
 
       - name: Collect APKs
@@ -121,12 +126,13 @@ jobs:
           set -euo pipefail
           mkdir -p apk-output
 
-          find extracted -type f \
+          find "$USERAPP" "$DRIVERAPP" \
             -path '*/build/outputs/apk/*/*.apk' \
+            -type f \
             -exec cp {} apk-output/ \;
 
           if ! find apk-output -maxdepth 1 -name '*.apk' | grep -q .; then
-            echo "ERRORE: nessun APK generato."
+            echo "ERROR: nessun APK generato."
             exit 1
           fi
 
