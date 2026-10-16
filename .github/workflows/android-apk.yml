@@ -1,135 +1,114 @@
 name: Build DriveGo APKs
 
 on:
-  push:
-    branches:
-      - main
-  workflow_dispatch:
-
-permissions:
-  contents: read
+push:
+branches:
+- main
+workflow_dispatch:
 
 jobs:
-  build:
-    runs-on: ubuntu-latest
-    timeout-minutes: 60
+build:
+runs-on: ubuntu-22.04
 
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
+steps:
+  - name: Checkout repository
+    uses: actions/checkout@v4
 
-      - name: Find and extract project ZIP
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p extracted
+  - name: Setup Java 17 for Android SDK
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: "17"
 
-          ZIP="DriveGo-MVP-v2-apk-build-ready.zip"
+  - name: Setup Android SDK
+    uses: android-actions/setup-android@v3
 
-          if [ ! -f "$ZIP" ]; then
-            ZIP="$(find . -maxdepth 1 -type f -name '*.zip' | head -n 1)"
-          fi
+  - name: Install Android SDK packages
+    run: |
+      yes | sdkmanager --licenses
+      sdkmanager \
+        "platform-tools" \
+        "platforms;android-29" \
+        "build-tools;29.0.2" \
+        "ndk;21.4.7075529"
 
-          if [ -z "$ZIP" ] || [ ! -f "$ZIP" ]; then
-            echo "ERROR: file ZIP del progetto non trovato."
-            exit 1
-          fi
+  - name: Extract project archives
+    run: |
+      mkdir -p extracted
+      unzip -q DriveGo-MVP-v2-apk-build-ready.zip -d extracted/user
+      unzip -q DriveGo-MVP-v2-apk-build-ready-1.zip -d extracted/driver
 
-          unzip -q "$ZIP" -d extracted
+  - name: Locate app directories
+    id: apps
+    shell: bash
+    run: |
+      USER_DIR="$(find extracted/user -type d -name UserApp -print -quit)"
+      DRIVER_DIR="$(find extracted/driver -type d -name DriverApp -print -quit)"
 
-          USERAPP="$(find extracted -type d -name UserApp -print -quit)"
-          DRIVERAPP="$(find extracted -type d -name DriverApp -print -quit)"
+      if [ -z "$USER_DIR" ]; then
+        echo "ERROR: UserApp non trovato nel primo archivio ZIP"
+        exit 1
+      fi
 
-          if [ -z "$USERAPP" ] || [ -z "$DRIVERAPP" ]; then
-            echo "ERROR: UserApp o DriverApp non trovata."
-            find extracted -maxdepth 5 -type d
-            exit 1
-          fi
+      if [ -z "$DRIVER_DIR" ]; then
+        echo "ERROR: DriverApp non trovato nel secondo archivio ZIP"
+        exit 1
+      fi
 
-          echo "USERAPP=$USERAPP" >> "$GITHUB_ENV"
-          echo "DRIVERAPP=$DRIVERAPP" >> "$GITHUB_ENV"
+      echo "user_dir=$USER_DIR" >> "$GITHUB_OUTPUT"
+      echo "driver_dir=$DRIVER_DIR" >> "$GITHUB_OUTPUT"
 
-      - name: Set up Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
+  - name: Setup Java 11 for legacy Gradle
+    uses: actions/setup-java@v4
+    with:
+      distribution: temurin
+      java-version: "11"
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+  - name: Setup Node.js
+    uses: actions/setup-node@v4
+    with:
+      node-version: "16"
 
-      - name: Install Android SDK packages
-        shell: bash
-        run: |
-          set -euo pipefail
-          sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.2" "ndk;21.4.7075529"
+  - name: Install Yarn
+    run: npm install --global yarn@1.22.22
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '16'
+  - name: Build UserApp APK
+    working-directory: ${{ steps.apps.outputs.user_dir }}
+    run: |
+      yarn install --frozen-lockfile
+      cd android
+      chmod +x gradlew
+      ./gradlew assembleDebug
 
-      - name: Install Yarn
-        run: npm install --global yarn@1.22.22
+  - name: Build DriverApp APK
+    working-directory: ${{ steps.apps.outputs.driver_dir }}
+    run: |
+      yarn install --frozen-lockfile
+      cd android
+      chmod +x gradlew
+      ./gradlew assembleDebug
 
-      - name: Build UserApp APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$USERAPP"
-          yarn install --frozen-lockfile
+  - name: Collect APKs
+    shell: bash
+    run: |
+      set -e
+      mkdir -p output
 
-          if [ -f android/gradle.properties ]; then
-            sed -i 's/^FLIPPER_VERSION=.*/FLIPPER_VERSION=0.99.0/' android/gradle.properties
-          fi
+      USER_APK="$(find "${{ steps.apps.outputs.user_dir }}/android/app/build/outputs/apk" -type f -name '*.apk' -print -quit)"
+      DRIVER_APK="$(find "${{ steps.apps.outputs.driver_dir }}/android/app/build/outputs/apk" -type f -name '*.apk' -print -quit)"
 
-          cd android
-          chmod +x gradlew
-          printf 'sdk.dir=%s\nndk.dir=%s\n' \
-            "$ANDROID_HOME" "$ANDROID_HOME/ndk/21.4.7075529" > local.properties
+      if [ -z "$USER_APK" ] || [ -z "$DRIVER_APK" ]; then
+        echo "ERROR: Uno o entrambi gli APK non sono stati generati"
+        exit 1
+      fi
 
-          ./gradlew --no-daemon --stacktrace assembleDebug
+      cp "$USER_APK" output/UserApp.apk
+      cp "$DRIVER_APK" output/DriverApp.apk
+      ls -lh output/
 
-      - name: Build DriverApp APK
-        shell: bash
-        run: |
-          set -euo pipefail
-          cd "$DRIVERAPP"
-          yarn install --frozen-lockfile
-
-          if [ -f android/gradle.properties ]; then
-            sed -i 's/^FLIPPER_VERSION=.*/FLIPPER_VERSION=0.99.0/' android/gradle.properties
-          fi
-
-          cd android
-          chmod +x gradlew
-          printf 'sdk.dir=%s\nndk.dir=%s\n' \
-            "$ANDROID_HOME" "$ANDROID_HOME/ndk/21.4.7075529" > local.properties
-
-          ./gradlew --no-daemon --stacktrace assembleDebug
-
-      - name: Collect APKs
-        if: success()
-        shell: bash
-        run: |
-          set -euo pipefail
-          mkdir -p apk-output
-
-          find extracted -type f -path '*/build/outputs/apk/*/*.apk' \
-            -exec cp {} apk-output/ \;
-
-          if ! find apk-output -maxdepth 1 -name '*.apk' | grep -q .; then
-            echo "ERROR: nessun APK generato."
-            exit 1
-          fi
-
-          ls -lh apk-output
-
-      - name: Upload APKs
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: DriveGo-APKs
-          path: apk-output/*.apk
-          if-no-files-found: error
-          retention-days: 14
+  - name: Upload APKs
+    uses: actions/upload-artifact@v4
+    with:
+      name: DriveGo-APKs
+      path: output/*.apk
+      if-no-files-found: error
