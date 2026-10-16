@@ -1,6 +1,7 @@
+
 name: Build DriveGo APKs
 
-'on':
+on:
   push:
     branches:
       - main
@@ -21,23 +22,29 @@ jobs:
       - name: Find and extract project ZIP
         shell: bash
         run: |
-          set -eu
+          set -euo pipefail
+
           mkdir -p extracted
 
-          ZIP="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
-          if [ -z "$ZIP" ]; then
-            echo "ERRORE: non trovo un file ZIP nella root del repository."
+          ZIP="DriveGo-MVP-v2-apk-build-ready.zip"
+
+          if [ ! -f "$ZIP" ]; then
+            ZIP="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
+          fi
+
+          if [ -z "${ZIP:-}" ] || [ ! -f "$ZIP" ]; then
+            echo "ERRORE: non trovo lo ZIP del progetto."
             exit 1
           fi
 
-          echo "Archivio: $ZIP"
+          echo "Archivio trovato: $ZIP"
           unzip -q "$ZIP" -d extracted
 
           USERAPP="$(find extracted -type d -name UserApp -print -quit)"
           DRIVERAPP="$(find extracted -type d -name DriverApp -print -quit)"
 
           if [ -z "$USERAPP" ] || [ -z "$DRIVERAPP" ]; then
-            echo "ERRORE: nello ZIP mancano UserApp o DriverApp."
+            echo "ERRORE: UserApp o DriverApp non trovata nello ZIP."
             find extracted -maxdepth 5 -type d
             exit 1
           fi
@@ -48,7 +55,7 @@ jobs:
           echo "UserApp: $USERAPP"
           echo "DriverApp: $DRIVERAPP"
 
-      - name: Setup Java 17
+      - name: Setup Java 17 for Android SDK
         uses: actions/setup-java@v4
         with:
           distribution: temurin
@@ -56,18 +63,25 @@ jobs:
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
-        with:
-          packages: ''
 
       - name: Install Android SDK packages
         shell: bash
         run: |
-          sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.2"
+          sdkmanager "platform-tools" \
+            "platforms;android-29" \
+            "build-tools;29.0.2"
+
+      - name: Setup Java 11 for legacy Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '11'
 
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '16'
+          cache: ''
 
       - name: Install Yarn
         run: npm install --global yarn@1.22.22
@@ -75,41 +89,41 @@ jobs:
       - name: Build UserApp APK
         shell: bash
         run: |
-          set -eu
-          cd "$USERAPP"
+          set -euo pipefail
 
+          cd "$USERAPP"
           yarn install --frozen-lockfile
 
           cd android
           chmod +x gradlew
-
           ./gradlew --no-daemon --stacktrace assembleDebug
 
       - name: Build DriverApp APK
         shell: bash
         run: |
-          set -eu
-          cd "$DRIVERAPP"
+          set -euo pipefail
 
+          cd "$DRIVERAPP"
           yarn install --frozen-lockfile
 
           cd android
           chmod +x gradlew
-
           ./gradlew --no-daemon --stacktrace assembleDebug
 
       - name: Collect APKs
         if: success()
         shell: bash
         run: |
-          set -eu
+          set -euo pipefail
+
           mkdir -p apk-output
 
-          find extracted -type f -path '*/build/outputs/apk/*/*.apk' \
+          find extracted -type f \
+            -path '*/build/outputs/apk/*/*.apk' \
             -exec cp {} apk-output/ \;
 
           if ! find apk-output -maxdepth 1 -type f -name '*.apk' | grep -q .; then
-            echo "ERRORE: la compilazione non ha prodotto APK."
+            echo "ERRORE: nessun APK generato."
             exit 1
           fi
 
