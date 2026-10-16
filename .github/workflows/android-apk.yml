@@ -27,33 +27,28 @@ jobs:
           mkdir -p extracted
 
           ZIP="DriveGo-MVP-v2-apk-build-ready.zip"
-
           if [ ! -f "$ZIP" ]; then
-            ZIP="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
+            ZIP="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1 || true)"
           fi
 
-          if [ -z "${ZIP:-}" ] || [ ! -f "$ZIP" ]; then
-            echo "ERRORE: non trovo lo ZIP del progetto."
+          if [ -z "$ZIP" ] || [ ! -f "$ZIP" ]; then
+            echo "ERRORE: file ZIP del progetto non trovato."
             exit 1
           fi
 
-          echo "Archivio trovato: $ZIP"
           unzip -q "$ZIP" -d extracted
 
           USERAPP="$(find extracted -type d -name UserApp -print -quit)"
           DRIVERAPP="$(find extracted -type d -name DriverApp -print -quit)"
 
           if [ -z "$USERAPP" ] || [ -z "$DRIVERAPP" ]; then
-            echo "ERRORE: UserApp o DriverApp non trovata nello ZIP."
+            echo "ERRORE: UserApp o DriverApp non trovata."
             find extracted -maxdepth 5 -type d
             exit 1
           fi
 
           echo "USERAPP=$USERAPP" >> "$GITHUB_ENV"
           echo "DRIVERAPP=$DRIVERAPP" >> "$GITHUB_ENV"
-
-          echo "UserApp: $USERAPP"
-          echo "DriverApp: $DRIVERAPP"
 
       - name: Setup Java 17 for Android SDK
         uses: actions/setup-java@v4
@@ -65,7 +60,6 @@ jobs:
         uses: android-actions/setup-android@v4
 
       - name: Install Android SDK packages
-        shell: bash
         run: |
           sdkmanager "platform-tools" \
             "platforms;android-29" \
@@ -81,7 +75,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '16'
-          cache: ''
 
       - name: Install Yarn
         run: npm install --global yarn@1.22.22
@@ -90,9 +83,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$USERAPP"
           yarn install --frozen-lockfile
+
+          # Aggiorna Flipper solo se la versione legacy è presente.
+          if [ -f android/gradle.properties ]; then
+            sed -i 's/^FLIPPER_VERSION=.*/FLIPPER_VERSION=0.99.0/' android/gradle.properties
+          fi
 
           cd android
           chmod +x gradlew
@@ -102,9 +99,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           cd "$DRIVERAPP"
           yarn install --frozen-lockfile
+
+          if [ -f android/gradle.properties ]; then
+            sed -i 's/^FLIPPER_VERSION=.*/FLIPPER_VERSION=0.99.0/' android/gradle.properties
+          fi
 
           cd android
           chmod +x gradlew
@@ -115,14 +115,13 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           mkdir -p apk-output
 
           find extracted -type f \
             -path '*/build/outputs/apk/*/*.apk' \
             -exec cp {} apk-output/ \;
 
-          if ! find apk-output -maxdepth 1 -type f -name '*.apk' | grep -q .; then
+          if ! find apk-output -maxdepth 1 -name '*.apk' | grep -q .; then
             echo "ERRORE: nessun APK generato."
             exit 1
           fi
