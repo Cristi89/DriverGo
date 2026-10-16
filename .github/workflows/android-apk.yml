@@ -15,7 +15,7 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Setup Java 17
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "17"
@@ -27,7 +27,7 @@ jobs:
         shell: bash
         run: |
           set -e
-          sdkmanager --licenses < /dev/null || true
+          sdkmanager --licenses
           sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.2" "ndk;21.4.7075529"
 
       - name: Extract project archives
@@ -46,21 +46,14 @@ jobs:
           USER_DIR="$(find extracted/user -type d -name UserApp -print -quit)"
           DRIVER_DIR="$(find extracted/driver -type d -name DriverApp -print -quit)"
 
-          if [ -z "$USER_DIR" ]; then
-            echo "ERROR: UserApp non trovato"
-            exit 1
-          fi
-
-          if [ -z "$DRIVER_DIR" ]; then
-            echo "ERROR: DriverApp non trovato"
-            exit 1
-          fi
+          test -n "$USER_DIR" || { echo "UserApp non trovato"; exit 1; }
+          test -n "$DRIVER_DIR" || { echo "DriverApp non trovato"; exit 1; }
 
           echo "user_dir=$USER_DIR" >> "$GITHUB_OUTPUT"
           echo "driver_dir=$DRIVER_DIR" >> "$GITHUB_OUTPUT"
 
       - name: Setup Java 11 for legacy Gradle
-        uses: actions/setup-java@v4
+        uses: actions/setup-java@v5
         with:
           distribution: temurin
           java-version: "11"
@@ -73,6 +66,18 @@ jobs:
       - name: Install Yarn
         run: npm install --global yarn@1.22.22
 
+      - name: Add Maven Central to Android repositories
+        shell: bash
+        run: |
+          set -e
+          for f in \
+            "${{ steps.apps.outputs.user_dir }}/android/build.gradle" \
+            "${{ steps.apps.outputs.driver_dir }}/android/build.gradle"; do
+            if ! grep -q 'mavenCentral()' "$f"; then
+              sed -i '/google()/a\        mavenCentral()' "$f"
+            fi
+          done
+
       - name: Build UserApp APK
         working-directory: ${{ steps.apps.outputs.user_dir }}
         shell: bash
@@ -81,7 +86,7 @@ jobs:
           yarn install --frozen-lockfile
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew --no-daemon assembleRelease
 
       - name: Build DriverApp APK
         working-directory: ${{ steps.apps.outputs.driver_dir }}
@@ -91,7 +96,7 @@ jobs:
           yarn install --frozen-lockfile
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
+          ./gradlew --no-daemon assembleRelease
 
       - name: Collect APKs
         shell: bash
@@ -99,13 +104,11 @@ jobs:
           set -e
           mkdir -p output
 
-          USER_APK="$(find "${{ steps.apps.outputs.user_dir }}/android/app/build/outputs/apk" -type f -name '*.apk' -print -quit)"
-          DRIVER_APK="$(find "${{ steps.apps.outputs.driver_dir }}/android/app/build/outputs/apk" -type f -name '*.apk' -print -quit)"
+          USER_APK="$(find "${{ steps.apps.outputs.user_dir }}/android/app/build/outputs/apk" -type f -path '*/release/*.apk' -print -quit)"
+          DRIVER_APK="$(find "${{ steps.apps.outputs.driver_dir }}/android/app/build/outputs/apk" -type f -path '*/release/*.apk' -print -quit)"
 
-          if [ -z "$USER_APK" ] || [ -z "$DRIVER_APK" ]; then
-            echo "ERROR: APK non generato"
-            exit 1
-          fi
+          test -n "$USER_APK" || { echo "APK UserApp non generato"; exit 1; }
+          test -n "$DRIVER_APK" || { echo "APK DriverApp non generato"; exit 1; }
 
           cp "$USER_APK" output/UserApp.apk
           cp "$DRIVER_APK" output/DriverApp.apk
