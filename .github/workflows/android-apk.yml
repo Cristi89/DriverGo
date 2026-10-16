@@ -1,90 +1,119 @@
+name: Build DriveGo APKs
 
-{
-  "name": "Build DriveGo APKs",
-  "on": {
-    "push": {
-      "branches": ["main"]
-    },
-    "workflow_dispatch": {}
-  },
-  "jobs": {
-    "build": {
-      "runs-on": "ubuntu-22.04",
-      "steps": [
-        {
-          "name": "Checkout repository",
-          "uses": "actions/checkout@v4"
-        },
-        {
-          "name": "Setup Java 17 for Android SDK",
-          "uses": "actions/setup-java@v4",
-          "with": {
-            "distribution": "temurin",
-            "java-version": "17"
-          }
-        },
-        {
-          "name": "Setup Android SDK",
-          "uses": "android-actions/setup-android@v3"
-        },
-        {
-          "name": "Install Android SDK packages",
-          "run": "yes | sdkmanager --licenses\nsdkmanager \"platform-tools\" \"platforms;android-29\" \"build-tools;29.0.2\" \"ndk;21.4.7075529\""
-        },
-        {
-          "name": "Extract project archives",
-          "run": "mkdir -p extracted/user extracted/driver\nunzip -q DriveGo-MVP-v2-apk-build-ready.zip -d extracted/user\nunzip -q DriveGo-MVP-v2-apk-build-ready-1.zip -d extracted/driver"
-        },
-        {
-          "name": "Locate app directories",
-          "id": "apps",
-          "shell": "bash",
-          "run": "USER_DIR=\"$(find extracted/user -type d -name UserApp -print -quit)\"\nDRIVER_DIR=\"$(find extracted/driver -type d -name DriverApp -print -quit)\"\nif [ -z \"$USER_DIR\" ]; then echo \"UserApp non trovato\"; exit 1; fi\nif [ -z \"$DRIVER_DIR\" ]; then echo \"DriverApp non trovato\"; exit 1; fi\necho \"user_dir=$USER_DIR\" >> \"$GITHUB_OUTPUT\"\necho \"driver_dir=$DRIVER_DIR\" >> \"$GITHUB_OUTPUT\""
-        },
-        {
-          "name": "Setup Java 11 for legacy Gradle",
-          "uses": "actions/setup-java@v4",
-          "with": {
-            "distribution": "temurin",
-            "java-version": "11"
-          }
-        },
-        {
-          "name": "Setup Node.js",
-          "uses": "actions/setup-node@v4",
-          "with": {
-            "node-version": "16"
-          }
-        },
-        {
-          "name": "Install Yarn",
-          "run": "npm install --global yarn@1.22.22"
-        },
-        {
-          "name": "Build UserApp APK",
-          "working-directory": "${{ steps.apps.outputs.user_dir }}",
-          "run": "yarn install --frozen-lockfile\ncd android\nchmod +x gradlew\n./gradlew assembleDebug"
-        },
-        {
-          "name": "Build DriverApp APK",
-          "working-directory": "${{ steps.apps.outputs.driver_dir }}",
-          "run": "yarn install --frozen-lockfile\ncd android\nchmod +x gradlew\n./gradlew assembleDebug"
-        },
-        {
-          "name": "Collect APKs",
-          "shell": "bash",
-          "run": "set -e\nmkdir -p output\nUSER_APK=\"$(find \"${{ steps.apps.outputs.user_dir }}/android/app/build/outputs/apk\" -type f -name '*.apk' -print -quit)\"\nDRIVER_APK=\"$(find \"${{ steps.apps.outputs.driver_dir }}/android/app/build/outputs/apk\" -type f -name '*.apk' -print -quit)\"\nif [ -z \"$USER_APK\" ] || [ -z \"$DRIVER_APK\" ]; then echo \"APK non trovato\"; exit 1; fi\ncp \"$USER_APK\" output/UserApp.apk\ncp \"$DRIVER_APK\" output/DriverApp.apk\nls -lh output/"
-        },
-        {
-          "name": "Upload APKs",
-          "uses": "actions/upload-artifact@v4",
-          "with": {
-            "name": "DriveGo-APKs",
-            "path": "output/*.apk",
-            "if-no-files-found": "error"
-          }
-        }
-      ]
-    }
-  }
-}
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-22.04
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "17"
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v4
+
+      - name: Install Android SDK packages
+        shell: bash
+        run: |
+          set -e
+          yes | sdkmanager --licenses
+          sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.2" "ndk;21.4.7075529"
+
+      - name: Extract project archives
+        shell: bash
+        run: |
+          set -e
+          mkdir -p extracted/user extracted/driver
+          unzip -q DriveGo-MVP-v2-apk-build-ready.zip -d extracted/user
+          unzip -q DriveGo-MVP-v2-apk-build-ready-1.zip -d extracted/driver
+
+      - name: Locate app directories
+        id: apps
+        shell: bash
+        run: |
+          set -e
+          USER_DIR="$(find extracted/user -type d -name UserApp -print -quit)"
+          DRIVER_DIR="$(find extracted/driver -type d -name DriverApp -print -quit)"
+
+          if [ -z "$USER_DIR" ]; then
+            echo "ERROR: UserApp non trovato"
+            exit 1
+          fi
+
+          if [ -z "$DRIVER_DIR" ]; then
+            echo "ERROR: DriverApp non trovato"
+            exit 1
+          fi
+
+          echo "user_dir=$USER_DIR" >> "$GITHUB_OUTPUT"
+          echo "driver_dir=$DRIVER_DIR" >> "$GITHUB_OUTPUT"
+
+      - name: Setup Java 11 for legacy Gradle
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: "11"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "16"
+
+      - name: Install Yarn
+        run: npm install --global yarn@1.22.22
+
+      - name: Build UserApp APK
+        working-directory: ${{ steps.apps.outputs.user_dir }}
+        shell: bash
+        run: |
+          set -e
+          yarn install --frozen-lockfile
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Build DriverApp APK
+        working-directory: ${{ steps.apps.outputs.driver_dir }}
+        shell: bash
+        run: |
+          set -e
+          yarn install --frozen-lockfile
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleDebug
+
+      - name: Collect APKs
+        shell: bash
+        run: |
+          set -e
+          mkdir -p output
+
+          USER_APK="$(find "${{ steps.apps.outputs.user_dir }}/android/app/build/outputs/apk" -type f -name '*.apk' -print -quit)"
+          DRIVER_APK="$(find "${{ steps.apps.outputs.driver_dir }}/android/app/build/outputs/apk" -type f -name '*.apk' -print -quit)"
+
+          if [ -z "$USER_APK" ] || [ -z "$DRIVER_APK" ]; then
+            echo "ERROR: APK non generato"
+            exit 1
+          fi
+
+          cp "$USER_APK" output/UserApp.apk
+          cp "$DRIVER_APK" output/DriverApp.apk
+          ls -lh output/
+
+      - name: Upload APKs
+        uses: actions/upload-artifact@v4
+        with:
+          name: DriveGo-APKs
+          path: output/*.apk
+          if-no-files-found: error
