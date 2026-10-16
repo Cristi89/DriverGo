@@ -1,6 +1,6 @@
 name: Build DriveGo APKs
 
-on:
+'on':
   push:
     branches:
       - main
@@ -12,31 +12,32 @@ permissions:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
 
     steps:
-      - name: Checkout
+      - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Extract project ZIP
+      - name: Find and extract project ZIP
         shell: bash
         run: |
-          set -e
+          set -eu
           mkdir -p extracted
-          ZIP="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
 
+          ZIP="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
           if [ -z "$ZIP" ]; then
-            echo "ERRORE: nessun file ZIP trovato."
+            echo "ERRORE: non trovo un file ZIP nella root del repository."
             exit 1
           fi
 
+          echo "Archivio: $ZIP"
           unzip -q "$ZIP" -d extracted
 
-          USERAPP="$(find extracted -type d -name UserApp | head -n 1)"
-          DRIVERAPP="$(find extracted -type d -name DriverApp | head -n 1)"
+          USERAPP="$(find extracted -type d -name UserApp -print -quit)"
+          DRIVERAPP="$(find extracted -type d -name DriverApp -print -quit)"
 
           if [ -z "$USERAPP" ] || [ -z "$DRIVERAPP" ]; then
-            echo "ERRORE: cartelle UserApp o DriverApp mancanti."
+            echo "ERRORE: nello ZIP mancano UserApp o DriverApp."
             find extracted -maxdepth 5 -type d
             exit 1
           fi
@@ -44,32 +45,29 @@ jobs:
           echo "USERAPP=$USERAPP" >> "$GITHUB_ENV"
           echo "DRIVERAPP=$DRIVERAPP" >> "$GITHUB_ENV"
 
-      - name: Setup Java 11 for legacy Gradle
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '11'
+          echo "UserApp: $USERAPP"
+          echo "DriverApp: $DRIVERAPP"
 
-      - name: Setup Java 17 for Android SDK
+      - name: Setup Java 17
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
-
-      - name: Setup Node
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
 
       - name: Setup Android SDK
         uses: android-actions/setup-android@v4
         with:
           packages: ''
 
-      - name: Install Android packages
+      - name: Install Android SDK packages
         shell: bash
         run: |
           sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.2"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Install Yarn
         run: npm install --global yarn@1.22.22
@@ -77,42 +75,51 @@ jobs:
       - name: Build UserApp APK
         shell: bash
         run: |
-          set -e
+          set -eu
           cd "$USERAPP"
+
           yarn install --frozen-lockfile
+
           cd android
           chmod +x gradlew
-          export JAVA_HOME="$JAVA_HOME_11_X64"
-          export PATH="$JAVA_HOME/bin:$PATH"
-          ./gradlew --no-daemon assembleDebug
+
+          ./gradlew --no-daemon --stacktrace assembleDebug
 
       - name: Build DriverApp APK
         shell: bash
         run: |
-          set -e
+          set -eu
           cd "$DRIVERAPP"
+
           yarn install --frozen-lockfile
+
           cd android
           chmod +x gradlew
-          export JAVA_HOME="$JAVA_HOME_11_X64"
-          export PATH="$JAVA_HOME/bin:$PATH"
-          ./gradlew --no-daemon assembleDebug
 
-      - name: Collect APK files
-        if: always()
+          ./gradlew --no-daemon --stacktrace assembleDebug
+
+      - name: Collect APKs
+        if: success()
         shell: bash
         run: |
+          set -eu
           mkdir -p apk-output
-          find extracted -type f -name '*.apk' \
-            -path '*/build/outputs/apk/*' \
-            -exec cp --parents {} apk-output/ \; || true
-          find apk-output -type f -name '*.apk' || true
+
+          find extracted -type f -path '*/build/outputs/apk/*/*.apk' \
+            -exec cp {} apk-output/ \;
+
+          if ! find apk-output -maxdepth 1 -type f -name '*.apk' | grep -q .; then
+            echo "ERRORE: la compilazione non ha prodotto APK."
+            exit 1
+          fi
+
+          ls -lh apk-output
 
       - name: Upload APKs
+        if: success()
         uses: actions/upload-artifact@v4
-        if: always()
         with:
           name: DriveGo-APKs
-          path: apk-output/**/*.apk
-          if-no-files-found: warn
+          path: apk-output/*.apk
+          if-no-files-found: error
           retention-days: 14
