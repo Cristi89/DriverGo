@@ -23,11 +23,10 @@ jobs:
         run: |
           set -e
           mkdir -p extracted
-
           ZIP="$(find . -maxdepth 1 -type f -iname '*.zip' | head -n 1)"
 
           if [ -z "$ZIP" ]; then
-            echo "ERRORE: nessun file ZIP trovato nella root del repository."
+            echo "ERRORE: nessun file ZIP trovato."
             exit 1
           fi
 
@@ -37,7 +36,7 @@ jobs:
           DRIVERAPP="$(find extracted -type d -name DriverApp | head -n 1)"
 
           if [ -z "$USERAPP" ] || [ -z "$DRIVERAPP" ]; then
-            echo "ERRORE: non trovo entrambe le cartelle UserApp e DriverApp."
+            echo "ERRORE: cartelle UserApp o DriverApp mancanti."
             find extracted -maxdepth 5 -type d
             exit 1
           fi
@@ -45,20 +44,17 @@ jobs:
           echo "USERAPP=$USERAPP" >> "$GITHUB_ENV"
           echo "DRIVERAPP=$DRIVERAPP" >> "$GITHUB_ENV"
 
-          echo "UserApp trovata: $USERAPP"
-          echo "DriverApp trovata: $DRIVERAPP"
-
-      - name: Setup Java 17
-        uses: actions/setup-java@v4
-        with:
-          distribution: temurin
-          java-version: '17'
-
       - name: Setup Java 11 for legacy Gradle
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '11'
+
+      - name: Setup Java 17 for Android SDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -66,12 +62,13 @@ jobs:
           node-version: '20'
 
       - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+        uses: android-actions/setup-android@v4
+        with:
+          packages: ''
 
       - name: Install Android packages
         shell: bash
         run: |
-          yes | sdkmanager --licenses || true
           sdkmanager "platform-tools" "platforms;android-29" "build-tools;29.0.2"
 
       - name: Install Yarn
@@ -106,12 +103,9 @@ jobs:
         shell: bash
         run: |
           mkdir -p apk-output
-
           find extracted -type f -name '*.apk' \
             -path '*/build/outputs/apk/*' \
             -exec cp --parents {} apk-output/ \; || true
-
-          echo "APK trovati:"
           find apk-output -type f -name '*.apk' || true
 
       - name: Upload APKs
